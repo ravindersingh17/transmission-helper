@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+import sys,os,json
+from getpass import getpass
+from torhelp import *
+from argparse import ArgumentParser
+
+parser = ArgumentParser(description="Option for torrent client")
+parser.add_argument("--init", action="store_true")
+parser.add_argument("--status", action="store_true")
+parser.add_argument("--clean", action="store_true")
+parser.add_argument("--stop-all", action="store_true")
+parser.add_argument("--start-all", action="store_true")
+parser.add_argument("--info", type=str)
+parser.add_argument("--engine", type=str, default="pirate")
+parser.add_argument("search", type=str, nargs="*")
+
+args = parser.parse_args()
+conf = os.path.join(os.path.expanduser("~"), ".tor-cli.json")
+
+if args.init:
+    user = input("Transmission daemon username: ")
+    password = getpass(prompt="Transmission daemon password: ")
+    with open(conf, "w") as f:
+        f.write(json.dumps({"user": user, "password": password}))
+    sys.exit(0)
+
+try:
+    settings = json.loads(open(conf).read())
+except FileNotFoundError:
+    print("Settings not found, run --init first")
+    sys.exit(1)
+torc = TorC(settings["user"], settings["password"])
+webc = WebC(settings["medurl"])
+
+if args.status:
+    r = webc.update_files(torc.get_files())
+    for tor in torc.status():
+        print("%s @ %s b/s "%(tor[0], tor[1]))
+        for f in tor[2]:
+            print("         %s %.2f%%" %(f["name"], f["completed"]))
+    sys.exit(0)
+
+if args.start_all:
+    torc.start_all()
+    print("Started All torrents")
+    sys.exit(0)
+
+if args.stop_all:
+    torc.stop_all()
+    print("Stopped All torrents")
+    sys.exit(0)
+
+if args.clean:
+    torc.clean()
+    sys.exit(0)
+
+if args.info:
+    name,prevep,nextep = get_episode_dates(args.info)
+    print("Show: %s, Previous episode: %s, Next episode: %s" %(name, prevep, nextep))
+    sys.exit(0)
+
+if not args.search: 
+    print("Please proive a valid search term")
+    sys.exit(1)
+search = " ".join(args.search)
+engine = getattr(args, "engine", "1337")
+mod = piratebay if engine.startswith("pirate") else x1337
+sengine = SearchEngine(args.engine)
+searches = list(sengine.getsearches(search))
+
+maxlen = max(len(x['text']) for x in searches)
+for idx,s in enumerate(searches):
+    print(str(idx).ljust(3), end="")
+    print(s['text'].ljust(maxlen + 2), end = "")
+    print(s['size'].ljust(15), end="")
+    print(s['seeders'][0] + '/' + s['seeders'][1])
+
+choice = -1
+while choice == -1:
+    try: choice = int(input("Torrent index to download: "))
+    except ValueError: print("Enter valid choice")
+
+torrent = torc.add_magnet(sengine.gettorrent(searches[choice]["link"]))
+print("Added torrent: %s" %(torrent.name))
+ret = webc.init_files(torc.download_dir(), torc.get_files(torrent))
+#debug 
